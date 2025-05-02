@@ -30,13 +30,50 @@ def kmeans(slika, k=3, iteracije=10):
     segmented_image = centroids[labels].reshape(slika.shape)
 
     return np.uint8(segmented_image)
+    
+def meanshift(slika, h, dimenzija):
+    visina, sirina, _ = slika.shape
+    num_features = slika.shape[2]
+    slika_reshape = slika.reshape((-1, num_features))
 
+    if dimenzija == 5:
+        coordinates = np.column_stack(np.indices((visina, sirina)))
+        slika_reshape = np.hstack([slika_reshape, coordinates.reshape(-1, 2)])
 
-def meanshift(slika, velikost_okna, dimenzija):
-    '''Izvede segmentacijo slike z uporabo metode mean-shift.'''
-    pass
+    min_cd = 1e-3
+    max_iteracije = 10
+    converged_points = []
 
+    for i in range(len(slika_reshape)):
+        tocka = slika_reshape[i]
+        nova_tocka = np.zeros_like(tocka)
+        iteracija = 0
 
+        while np.linalg.norm(tocka - nova_tocka) > min_cd and iteracija < max_iteracije:
+            if iteracija > 0:
+                tocka = nova_tocka
+            razdalje = np.linalg.norm(slika_reshape - tocka, axis=1)
+            utezi = gaussian_kernel(razdalje, h)
+            utezi_sum = np.sum(utezi)
+            nova_tocka = np.sum(utezi[:, np.newaxis] * slika_reshape, axis=0) / utezi_sum
+            iteracija += 1
+
+        converged_points.append(nova_tocka)
+
+    centers = []
+    for point in converged_points:
+        close_centers = [center for center in centers if np.linalg.norm(center - point) < min_cd]
+        if close_centers:
+            closest_center = min(close_centers, key=lambda c: np.linalg.norm(c - point))
+            centers[centers.index(closest_center)] = (np.array(closest_center) + point) / 2
+        else:
+            centers.append(point)
+
+    centers = np.array(centers)
+    labels = np.argmin(np.linalg.norm(slika_reshape[:, np.newaxis] - centers, axis=2), axis=1)
+    segmented_image = centers[labels].reshape(slika.shape)
+    return np.uint8(segmented_image)
+    
 def izracunaj_centre(slika, izbira, dimenzija_centra, T):
     '''Izračuna centre za metodo kmeans.'''
     # Pridobimo dimenzije slike
