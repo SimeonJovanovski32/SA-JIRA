@@ -1,5 +1,6 @@
 import cv2 as cv
-
+import numpy as np
+import matplotlib.pyplot as plt
 
 def kmeans(slika, k=3, iteracije=10):
     '''Izvede segmentacijo slike z uporabo metode k-means.'''
@@ -117,5 +118,101 @@ def izracunaj_centre(slika, izbira, dimenzija_centra, T):
     
 
 
+
 if __name__ == "__main__":
-    pass
+    # Load the image
+    slika = cv.imread('zelenjave.jpg')  # Replace with the path to your image
+    if slika is None:
+        print("Error: Image not found.")
+    else:
+        # Convert the image to RGB (OpenCV loads images in BGR format by default)
+        slika_rgb = cv.cvtColor(slika, cv.COLOR_BGR2RGB)
+
+        # Apply the k-means function
+        k = 3  # Number of clusters
+        iteracije = 10  # Number of iterations
+        segmented_image = kmeans(slika_rgb, k=k, iteracije=iteracije)
+
+        # Display the original and segmented image using matplotlib
+        plt.figure(figsize=(10, 5))
+
+        # Original image
+        plt.subplot(1, 2, 1)
+        plt.imshow(slika_rgb)
+        plt.title("Original Image")
+        plt.axis('off')
+
+        # Segmented image
+        plt.subplot(1, 2, 2)
+        plt.imshow(segmented_image)
+        plt.title("Segmented Image")
+        plt.axis('off')
+
+        plt.show()
+
+        # Optionally save the segmented image
+        segmented_image_bgr = cv.cvtColor(segmented_image, cv.COLOR_RGB2BGR)
+        cv.imwrite('segmented_zelenjave_sliko.jpg', segmented_image_bgr)
+
+        # Apply the Mean-Shift function with different settings
+        meanshift_segmented_image_h10 = meanshift(slika_rgb, h=10, dimenzija=3)
+        meanshift_segmented_image_h30 = meanshift(slika_rgb, h=30, dimenzija=3)
+
+        # Prepare features for dimenzija=5
+        visina, sirina, _ = slika_rgb.shape
+        coordinates = np.column_stack(np.indices((visina, sirina)))
+        slika_features = np.hstack([slika_rgb.reshape(-1, 3), coordinates.reshape(-1, 2)]).reshape((visina, sirina, 5))
+
+        meanshift_segmented_image_dim5 = meanshift(slika_features, h=20, dimenzija=5)
+
+        # Display results
+        plt.figure(figsize=(15, 10))
+
+        plt.subplot(2, 3, 1)
+        plt.imshow(slika_rgb)
+        plt.title("Original Image")
+        plt.axis('off')
+
+        plt.subplot(2, 3, 2)
+        plt.imshow(segmented_image)
+        plt.title("K-means (k=3)")
+        plt.axis('off')
+
+        plt.subplot(2, 3, 4)
+        plt.imshow(meanshift_segmented_image_h10)
+        plt.title("Mean-Shift (h=10, dim=3)")
+        plt.axis('off')
+
+        plt.subplot(2, 3, 5)
+        plt.imshow(meanshift_segmented_image_h30)
+        plt.title("Mean-Shift (h=30, dim=3)")
+        plt.axis('off')
+
+        plt.subplot(2, 3, 6)
+        plt.imshow(meanshift_segmented_image_dim5)
+        plt.title("Mean-Shift (h=20, dim=5)")
+        plt.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+        # Save segmented images
+        cv.imwrite('meanshift_h10.jpg', cv.cvtColor(meanshift_segmented_image_h10, cv.COLOR_RGB2BGR))
+        cv.imwrite('meanshift_h30.jpg', cv.cvtColor(meanshift_segmented_image_h30, cv.COLOR_RGB2BGR))
+        cv.imwrite('meanshift_dim5.jpg', cv.cvtColor(meanshift_segmented_image_dim5, cv.COLOR_RGB2BGR))
+
+        # Demonstration: when does it make sense to use location (dim=5)?
+        plt.figure(figsize=(12, 6))
+
+        plt.subplot(1, 2, 1)
+        plt.imshow(meanshift_segmented_image_h30)
+        plt.title("Mean-Shift without location (h=30, dim=3)")
+        plt.axis('off')
+
+        plt.subplot(1, 2, 2)
+        plt.imshow(meanshift_segmented_image_dim5)
+        plt.title("Mean-Shift with location (h=20, dim=5)")
+        plt.axis('off')
+
+        plt.tight_layout()
+        plt.show()
