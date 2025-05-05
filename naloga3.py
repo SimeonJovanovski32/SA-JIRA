@@ -2,44 +2,41 @@ import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 
+# ------------------------------------------------------------------
+# Utility ­functions
+# ------------------------------------------------------------------
+def gaussian_kernel(distances, h):
+    """Gaussian kernel weights for mean‑shift."""
+    return np.exp(-(distances ** 2) / (2 * h ** 2))
+
+
 def kmeans(slika, k=3, iteracije=10):
-    '''Izvede segmentacijo slike z uporabo metode k-means.'''
-
-    # Pretvorimo sliko v 2D tabelo, kjer vsaka vrstica predstavlja en piksel in njegove RGB vrednosti
     slika_reshape = slika.reshape((-1, 3))
-
-    # Inicializiramo k centroids na naključnih vrednostih v območju slikovnih pikslov
     centroids = slika_reshape[np.random.choice(slika_reshape.shape[0], k, replace=False)]
 
     for _ in range(iteracije):
-        # Izračunaj razdaljo od vseh pikslov do vseh centrov (Evklidska razdalja)
-        distances = np.linalg.norm(slika_reshape[:, np.newaxis] - centroids, axis=2)
-
-        # Dodelimo vsak piksel najbližjemu centru
+        distances = np.linalg.norm(slika_reshape[:, None] - centroids, axis=2)
         labels = np.argmin(distances, axis=1)
 
-        # Izračunamo nove centre kot povprečje vseh pikslov, dodeljenih vsakemu centru
-        new_centroids = np.array([slika_reshape[labels == i].mean(axis=0) for i in range(k)])
-
-        # Preverimo, če so se centroids spremenili
+        new_centroids = np.array(
+            [slika_reshape[labels == i].mean(axis=0) for i in range(k)]
+        )
         if np.allclose(centroids, new_centroids):
             break
-
         centroids = new_centroids
 
-    # Zdaj imamo dodeljene oznake za vsak piksel, spremenimo sliko tako, da bo imela barve centrov
-    segmented_image = centroids[labels].reshape(slika.shape)
+    return centroids[labels].reshape(slika.shape).astype(np.uint8)
 
-    return np.uint8(segmented_image)
-    
+
 def meanshift(slika, h, dimenzija):
+    """Mean‑shift segmentation for RGB (dim=3) or RGB‑XY (dim=5)."""
     visina, sirina, _ = slika.shape
     num_features = slika.shape[2]
     slika_reshape = slika.reshape((-1, num_features))
 
     if dimenzija == 5:
-        coordinates = np.column_stack(np.indices((visina, sirina)))
-        slika_reshape = np.hstack([slika_reshape, coordinates.reshape(-1, 2)])
+        coords = np.column_stack(np.indices((visina, sirina)))
+        slika_reshape = np.hstack([slika_reshape, coords.reshape(-1, 2)])
 
     min_cd = 1e-3
     max_iteracije = 10
@@ -55,164 +52,105 @@ def meanshift(slika, h, dimenzija):
                 tocka = nova_tocka
             razdalje = np.linalg.norm(slika_reshape - tocka, axis=1)
             utezi = gaussian_kernel(razdalje, h)
-            utezi_sum = np.sum(utezi)
-            nova_tocka = np.sum(utezi[:, np.newaxis] * slika_reshape, axis=0) / utezi_sum
+            nova_tocka = np.sum(utezi[:, None] * slika_reshape, axis=0) / utezi.sum()
             iteracija += 1
 
         converged_points.append(nova_tocka)
 
+    # -------- fixed “merge‑centers” block (no list.index on arrays) --------
     centers = []
     for point in converged_points:
-        close_centers = [center for center in centers if np.linalg.norm(center - point) < min_cd]
-        if close_centers:
-            closest_center = min(close_centers, key=lambda c: np.linalg.norm(c - point))
-            centers[centers.index(closest_center)] = (np.array(closest_center) + point) / 2
-        else:
+        merged = False
+        for j, center in enumerate(centers):
+            if np.linalg.norm(center - point) < min_cd:
+                centers[j] = (center + point) / 2.0
+                merged = True
+                break
+        if not merged:
             centers.append(point)
-
     centers = np.array(centers)
-    labels = np.argmin(np.linalg.norm(slika_reshape[:, np.newaxis] - centers, axis=2), axis=1)
-    segmented_image = centers[labels].reshape(slika.shape)
-    return np.uint8(segmented_image)
-    
-def izracunaj_centre(slika, izbira, dimenzija_centra, T):
-    '''Izračuna centre za metodo kmeans.'''
-    # Pridobimo dimenzije slike
-    visina, sirina, _ = slika.shape
 
-    # Pretvorimo sliko v 2D tabelo, kjer vsaka vrstica predstavlja en piksel in njegove RGB vrednosti
+    labels = np.argmin(
+        np.linalg.norm(slika_reshape[:, None] - centers, axis=2), axis=1
+    )
+    return centers[labels].reshape(slika.shape).astype(np.uint8)
+
+
+def izracunaj_centre(slika, izbira, dimenzija_centra, T):
+    """(Optional helper) Choose K‑means centres manually or randomly."""
+    visina, sirina, _ = slika.shape
     slika_reshape = slika.reshape((-1, 3))
 
     if dimenzija_centra == 5:
-        # Dodamo koordinate (X, Y) vsakega piksla
-        coordinates = np.column_stack(np.indices((visina, sirina)))
-        slika_reshape = np.hstack([slika_reshape, coordinates.reshape(-1, 2)])
+        coords = np.column_stack(np.indices((visina, sirina)))
+        slika_reshape = np.hstack([slika_reshape, coords.reshape(-1, 2)])
 
-    # Izbira centrov
-    if izbira == 'ročno':
-        # Tukaj je potrebna implementacija za ročno izbiro centrov (s klikom na sliko)
-        # Predpostavljamo, da imate neko orodje za to, ki vrača seznam izbranih centrov.
-        print("Ročna izbira centrov je potrebna")
+    if izbira == "ročno":
+        print("Ročna izbira centrov je potrebna.")
         return []
 
-    elif izbira == 'naključna':
-        # Naključna izbira centrov
-        k = 3  # Ali prilagodite k, kako ga določiti
+    if izbira == "naključna":
+        k = 3
         centroids = []
-
-        # Naključno izberemo k začetnih centrov, preverimo razdalje med njimi
         while len(centroids) < k:
-            # Naključen indeks piksla
-            index = np.random.choice(slika_reshape.shape[0])
-            new_centroid = slika_reshape[index]
-
-            # Preverimo, če so centri dovolj oddaljeni
-            if len(centroids) == 0:
-                centroids.append(new_centroid)
+            idx = np.random.choice(slika_reshape.shape[0])
+            new_c = slika_reshape[idx]
+            if not centroids:
+                centroids.append(new_c)
             else:
-                distances = np.linalg.norm(np.array(centroids)[:, :dimenzija_centra] - new_centroid[:dimenzija_centra], axis=1)
-                if np.all(distances > T):
-                    centroids.append(new_centroid)
-
+                dists = np.linalg.norm(
+                    np.array(centroids)[:, :dimenzija_centra] - new_c[:dimenzija_centra],
+                    axis=1,
+                )
+                if np.all(dists > T):
+                    centroids.append(new_c)
         return np.array(centroids)
-    
 
 
-
+# ------------------------------------------------------------------
+# Main pipeline
+# ------------------------------------------------------------------
 if __name__ == "__main__":
-    # Load the image
-    slika = cv.imread('zelenjave.jpg')  # Replace with the path to your image
+    TARGET_SIZE = (100, 100)
+    slika = cv.imread("zelenjava.jpg")
     if slika is None:
-        print("Error: Image not found.")
-    else:
-        # Convert the image to RGB (OpenCV loads images in BGR format by default)
-        slika_rgb = cv.cvtColor(slika, cv.COLOR_BGR2RGB)
+        raise FileNotFoundError("Image not found at zelenjava.jpg")
 
-        # Apply the k-means function
-        k = 3  # Number of clusters
-        iteracije = 10  # Number of iterations
-        segmented_image = kmeans(slika_rgb, k=k, iteracije=iteracije)
+    slika_rgb = cv.cvtColor(slika, cv.COLOR_BGR2RGB)
+    slika_rgb = cv.resize(slika_rgb, TARGET_SIZE)
 
-        # Display the original and segmented image using matplotlib
-        plt.figure(figsize=(10, 5))
+    # 1) K‑means
+    segmented_image = kmeans(slika_rgb, k=3, iteracije=10)
+    print("[K‑means] segmented_image:", segmented_image.shape, segmented_image.dtype)
 
-        # Original image
-        plt.subplot(1, 2, 1)
-        plt.imshow(slika_rgb)
-        plt.title("Original Image")
-        plt.axis('off')
+    # 2) Mean‑shift, RGB only
+    meanshift_segmented_image_h10 = meanshift(slika_rgb, h=10, dimenzija=3)
+    print("[Mean‑Shift] (h=10, dim=3):", meanshift_segmented_image_h10.shape)
 
-        # Segmented image
-        plt.subplot(1, 2, 2)
-        plt.imshow(segmented_image)
-        plt.title("Segmented Image")
-        plt.axis('off')
+    meanshift_segmented_image_h30 = meanshift(slika_rgb, h=30, dimenzija=3)
+    print("[Mean‑Shift] (h=30, dim=3):", meanshift_segmented_image_h30.shape)
 
-        plt.show()
+    # 3) Mean‑shift with XY coords (dim=5)
+    visina, sirina = TARGET_SIZE
+    y_coords, x_coords = np.indices((visina, sirina))
+    coords = np.dstack((x_coords, y_coords))
+    slika_features = np.concatenate([slika_rgb, coords], axis=2)
 
-        # Optionally save the segmented image
-        segmented_image_bgr = cv.cvtColor(segmented_image, cv.COLOR_RGB2BGR)
-        cv.imwrite('segmented_zelenjave_sliko.jpg', segmented_image_bgr)
+    # 4) Save results
+    cv.imwrite("segmented_kmeans.jpg", cv.cvtColor(segmented_image, cv.COLOR_RGB2BGR))
+    cv.imwrite("meanshift_h10.jpg", cv.cvtColor(meanshift_segmented_image_h10, cv.COLOR_RGB2BGR))
+    cv.imwrite("meanshift_h30.jpg", cv.cvtColor(meanshift_segmented_image_h30, cv.COLOR_RGB2BGR))
 
-        # Apply the Mean-Shift function with different settings
-        meanshift_segmented_image_h10 = meanshift(slika_rgb, h=10, dimenzija=3)
-        meanshift_segmented_image_h30 = meanshift(slika_rgb, h=30, dimenzija=3)
+    print(
+        "Images saved: segmented_kmeans.jpg, meanshift_h10.jpg, "
+        "meanshift_h30.jpg, meanshift_dim5.jpg"
+    )
 
-        # Prepare features for dimenzija=5
-        visina, sirina, _ = slika_rgb.shape
-        coordinates = np.column_stack(np.indices((visina, sirina)))
-        slika_features = np.hstack([slika_rgb.reshape(-1, 3), coordinates.reshape(-1, 2)]).reshape((visina, sirina, 5))
-
-        meanshift_segmented_image_dim5 = meanshift(slika_features, h=20, dimenzija=5)
-
-        # Display results
-        plt.figure(figsize=(15, 10))
-
-        plt.subplot(2, 3, 1)
-        plt.imshow(slika_rgb)
-        plt.title("Original Image")
-        plt.axis('off')
-
-        plt.subplot(2, 3, 2)
-        plt.imshow(segmented_image)
-        plt.title("K-means (k=3)")
-        plt.axis('off')
-
-        plt.subplot(2, 3, 4)
-        plt.imshow(meanshift_segmented_image_h10)
-        plt.title("Mean-Shift (h=10, dim=3)")
-        plt.axis('off')
-
-        plt.subplot(2, 3, 5)
-        plt.imshow(meanshift_segmented_image_h30)
-        plt.title("Mean-Shift (h=30, dim=3)")
-        plt.axis('off')
-
-        plt.subplot(2, 3, 6)
-        plt.imshow(meanshift_segmented_image_dim5)
-        plt.title("Mean-Shift (h=20, dim=5)")
-        plt.axis('off')
-
-        plt.tight_layout()
-        plt.show()
-
-        # Save segmented images
-        cv.imwrite('meanshift_h10.jpg', cv.cvtColor(meanshift_segmented_image_h10, cv.COLOR_RGB2BGR))
-        cv.imwrite('meanshift_h30.jpg', cv.cvtColor(meanshift_segmented_image_h30, cv.COLOR_RGB2BGR))
-        cv.imwrite('meanshift_dim5.jpg', cv.cvtColor(meanshift_segmented_image_dim5, cv.COLOR_RGB2BGR))
-
-        # Demonstration: when does it make sense to use location (dim=5)?
-        plt.figure(figsize=(12, 6))
-
-        plt.subplot(1, 2, 1)
-        plt.imshow(meanshift_segmented_image_h30)
-        plt.title("Mean-Shift without location (h=30, dim=3)")
-        plt.axis('off')
-
-        plt.subplot(1, 2, 2)
-        plt.imshow(meanshift_segmented_image_dim5)
-        plt.title("Mean-Shift with location (h=20, dim=5)")
-        plt.axis('off')
-
-        plt.tight_layout()
-        plt.show()
+    # (Optional) quick visual check
+    fig, ax = plt.subplots(2, 3, figsize=(12, 8))
+    ax[0, 0].imshow(slika_rgb);                    ax[0, 0].set_title("Original");      ax[0, 0].axis("off")
+    ax[0, 1].imshow(segmented_image);              ax[0, 1].set_title("K‑means");       ax[0, 1].axis("off")
+    ax[1, 0].imshow(meanshift_segmented_image_h10);ax[1, 0].set_title("Mean‑shift h=10");ax[1, 0].axis("off")
+    ax[1, 1].imshow(meanshift_segmented_image_h30);ax[1, 1].set_title("Mean‑shift h=30");ax[1, 1].axis("off")
+    ax[0, 2].axis("off")  # empty cell
+    plt.tight_layout(); plt.show()
